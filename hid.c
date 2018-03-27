@@ -74,8 +74,8 @@ void hid_read(int j_fd, struct Report *j_rep, int r_id, report_desc_t r_desc)
          message_len, read_len);
   }
 
-  debug_printf("Size of read: %d\n", read_len);
-  debug_printf("Got:\n%s\n", message_buffer);
+  // debug_printf("Size of read: %d\n", read_len);
+  // debug_printf("Got:\n%s\n", message_buffer);
   hdata = hid_start_parse(r_desc, 1 << hid_input, r_id);
   if (hdata == NULL) {
     errx(1, "Parser failed to start");
@@ -86,9 +86,10 @@ void hid_read(int j_fd, struct Report *j_rep, int r_id, report_desc_t r_desc)
    * Makes no sense to iterate the entire list.
    */
   while (hid_get_item(hdata, &hitem)) {
-    if (hitem.usage) {
+    if (hitem.kind == 0 && hitem.usage) {
       usage_string = hid_usage_in_page(hitem.usage);
       debug_printf("Value: %d\t", hitem.report_size);
+      debug_printf("kind: %d\t", hitem.kind);
       debug_printf("Current val: %d\t", hid_get_data(message_buffer, &hitem));
       debug_printf("\t\tUsage: %d \t %s\n", hitem.usage, usage_string);
     }
@@ -112,7 +113,7 @@ int readloop(int joystick_fd, report_desc_t report_desc, int report_id)
                                 report_id);
 
   /* Allocate memory to report */
-  debug_printf("Report size: %d\n", report_size);
+  // debug_printf("Report size: %d\n", report_size);
   if (report_size <= 0) {
     errx(1, "Something went wrong with report size");
   } else {
@@ -134,7 +135,7 @@ int readloop(int joystick_fd, report_desc_t report_desc, int report_id)
       debug_printf("Select error in readloop()\n");
     } else if (retval) {
       if (FD_ISSET(joystick_fd, &input_fds)) {
-        debug_printf("Data available on %d\n", joystick_fd);
+        // debug_printf("Data available on %d\n", joystick_fd);
         /* Read the available data and process it */
         hid_read(joystick_fd,
                  &joystick_report,

@@ -101,7 +101,7 @@ int main(int argc, char **argv)
 
   debug_printf("report ID=%d\n", report_id);
 
-	report_desc = hid_get_report_desc(joystick_fd);
+  report_desc = hid_get_report_desc(joystick_fd);
   if (report_desc == 0) {
     errx(1, "Unable to obtain USB report description");
   }
