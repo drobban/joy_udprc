@@ -6,8 +6,8 @@
  * start with parsing arguments. - ok
  * Open device for reading, make some debugs outputs. - ok
  * Read changes. Store all relevant inputs into int array - 10%
- * Make binding functionality. - related to above
- * Wrap error handling with cleanup routine
+ * Make binding functionality. - related to above - To be added in hid.c
+ *
  */
 
 #include <sys/types.h>
@@ -93,7 +93,6 @@ int main(int argc, char **argv)
   if (joystick_fd < 0) {
     err(1, "%s", dev);
   }
-
 
   if (ioctl(joystick_fd, USB_GET_REPORT_ID, &report_id) < 0) {
     report_id = -1;
