@@ -38,7 +38,9 @@ void usage()
 {
   extern char * __progname;
 
-  fprintf(stderr, "Usage: %s -f device\n", __progname);
+  fprintf(stderr, " -v{vv}\t\tlog output. Control verbosity with number of v\n");
+  fprintf(stderr, " -f [FILE]\tpath or name of uhid\n");
+  fprintf(stderr, "Usage example: %s -f device\n", __progname);
 
   exit(1);
 }
@@ -52,7 +54,14 @@ int main(int argc, char **argv)
   int joystick_fd;
   report_desc_t report_desc;
   static int report_id = 0;
+  struct Config conf;
 
+  /*
+    Loglevel,
+    1 - Error/Warnings
+    2 - Info
+    3 - Debug
+  */
   verbose = 0;
 
   while ((ch = getopt(argc, argv, "hf:v")) != -1) {
@@ -105,7 +114,21 @@ int main(int argc, char **argv)
     errx(1, "Unable to obtain USB report description");
   }
 
-  readloop(joystick_fd, report_desc, report_id);
+
+  /* These values should be read from config as names
+   * and converted nums in the future
+   *
+   *axis_dir = -1 make inverted
+   */
+  conf = (struct Config){
+	  .mode_buttons = {(0x9 << 16)|0x1, (0x9 << 16)|0x2,
+			   (0x9 << 16)|0x4, (0x9 << 16)|0x5,
+			   (0x9 << 16)|0x7, (0x9 << 16)|0x8},
+	  .axis = {(0x1 << 16)|0x32, (0x1 << 16)|0x35,
+		   (0x2 << 16)|0xC4, (0x1 << 16)|0x30},
+	  .axis_dir = {1, -1, 1, 1}};
+
+  readloop(joystick_fd, report_desc, report_id, &conf);
 
   /* Free report description obtained by hid_get_report_desc() */
   hid_dispose_report_desc(report_desc);

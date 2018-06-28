@@ -1,9 +1,7 @@
 #include <sys/types.h>
 #include <sys/select.h>
-
 #include <dev/usb/usb.h>
 #include <dev/usb/usbhid.h>
-
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
@@ -16,83 +14,146 @@
 #include <usbhid.h>
 
 #include "debug.h"
+#include "hid.h"
+#include "com.h"
 
-void hid_read(int joy_fd, int report_id, report_desc_t report_desc, u_char *buffer, size_t size)
+#define AMAX 65535.0f
+#define PMIN 1100
+#define PMAX 1900
+
+#define MAX(X, Y) ((X > Y) ? X : Y)
+
+uint16_t
+axistopwm(int16_t value)
 {
-  int read_len = -1;
-  struct hid_data *hdata;
-  struct hid_item hitem;
-  const char *usage_string;
-
-  read_len = read(joy_fd, buffer, size);
-
-  /* Instead of dying, return so we can reset ardupilot comms */
-  if (read_len < 0) {
-    err(1, "Error: read from fd %d ", joy_fd);
-  }
-  if (read_len != size) {
-    errx(1, "Unexpected message len, should be: %lu is %d", size, read_len);
-  }
-
-  hdata = hid_start_parse(report_desc, 1 << hid_input, report_id);
-  if (hdata == NULL) {
-    errx(1, "Parser failed to start");
-  }
-
-  /* Read until end of items */
-  while (hid_get_item(hdata, &hitem)) {
-    if (hitem.kind == 0 && hitem.usage) {
-      usage_string = hid_usage_in_page(hitem.usage);
-      debug_printf("Value: %d\t", hitem.report_size);
-      debug_printf("kind: %d\t", hitem.kind);
-      debug_printf("Current val: %d\t", hid_get_data(buffer, &hitem));
-      debug_printf("\t\tUsage: %d \t %s\n", hitem.usage, usage_string);
-    }
-  }
-  hid_end_parse(hdata);
+	return (uint16_t)(((PMAX - PMIN) / AMAX) * (uint16_t)value + PMIN);
 }
 
-int readloop(int joystick_fd, report_desc_t report_desc, int report_id)
+int
+locate_items(report_desc_t d, int usages[], hid_item_t items[],
+    size_t len, int id)
 {
-  struct timeval timeout;
-  fd_set input_fds;
-  int retval = 0;
-  u_char message_buffer[1024];
-  size_t report_size;
+	int i;
 
-  report_size = hid_report_size(report_desc, hid_input, report_id);
-  if (report_size <= 0) {
-    errx(1, "Something went wrong with report size");
-  }
+	for (i = 0; i < len; i++) {
+		if (hid_locate(d, usages[i], hid_input, &items[i], id) == 0)
+			return 0;
+	}
 
-  if (sizeof(message_buffer) < report_size) {
-    errx(1, "OUT OF BUFFER - %zu\n", report_size);
-  }
+	return i;
+}
 
-  debug_printf("Entering into readloop\n");
+int
+hidtopwm(int joy_fd, u_char *buffer, size_t size,
+    struct rc_packet *udp_data,
+    hid_item_t button_items[], size_t nbuttons,
+    hid_item_t axis_items[], size_t naxis,
+    int dir[])
+{
+	int i;
+	int j;
+	int read_len = -1;
+	uint16_t aval;
 
-  /* Read joystick / Send ardupilot */
-  while (retval != -1) {
-    /* set new timeout */
-    timeout = (struct timeval){.tv_sec = 2, .tv_usec = 0};
+	read_len = read(joy_fd, buffer, size);
+	debug_printf("Read: %d \n", read_len);
 
-    FD_SET(joystick_fd, &input_fds);
+	/* Instead of dying, return so we can reset ardupilot comms */
+	if (read_len < 0) {
+		memset(udp_data->pwms,0x0, sizeof(udp_data->pwms));
+		return -1;
+		/* err(1, "Error: read from fd %d ", joy_fd); */
+		/* return error instead. make sure we clean up */
+	}
 
-    retval = select(joystick_fd + 1, &input_fds, NULL, NULL, &timeout);
-    if (retval == -1) {
-      debug_printf("Select error in readloop()\n");
-    } else if (retval) {
-      if (FD_ISSET(joystick_fd, &input_fds)) {
-        debug_printf("Data available on %d\n", joystick_fd);
-        /* Read the available data and process it */
-        hid_read(joystick_fd, report_id,
-                 report_desc, message_buffer, report_size);
-      } else {
-        debug_printf("Unexpected, no FD was set\n");
-      }
-    } else {
-      debug_printf("Timeout occured\n");
-    }
-  }
-  return 0;
+	if (read_len != size) {
+		errx(1, "Unexpected message len, should be: %lu is %d",
+		    size, read_len);
+	}
+
+	/* Convert buttons into modes */
+	for (i = 0; i < nbuttons; i++) {
+		if (hid_get_data(buffer, &button_items[i]))
+			udp_data->pwms[MODE] = mode_pwm_vals[i];
+	}
+	/* Convert axis */
+	for (j = 0; j < naxis; j++) {
+		aval = hid_get_data(buffer, &axis_items[j]);
+		udp_data->pwms[j] = axistopwm(dir[j] * MAX(aval, 1));
+	}
+
+	return 1;
+}
+
+int
+readloop(int joystick_fd, report_desc_t report_desc,
+    int report_id, struct Config *conf)
+{
+	int i;
+	int status = 0;
+	hid_item_t axis_items[AXIS_SIZE];
+	hid_item_t button_items[NMODES];
+	struct timeval timeout;
+	fd_set input_fds;
+	int retval = 0;
+	u_char message_buffer[MAX_MSG_BUFF];
+	size_t report_size;
+	struct rc_packet udp_data;
+
+	/* Init udp_data with default values */
+	memset(&udp_data, 0x0, sizeof(udp_data));
+	memcpy(udp_data.pwms, DEFAULT_PWM, sizeof(udp_data.pwms));
+
+	/* set new timeout */
+	timeout = (struct timeval){.tv_sec = 2, .tv_usec = 0};
+
+	report_size = hid_report_size(report_desc, hid_input, report_id);
+	if (report_size <= 0) {
+		errx(1, "Something went wrong with report size");
+	}
+
+	if (sizeof(message_buffer) < report_size) {
+		errx(1, "OUT OF BUFFER - %zu\n", report_size);
+	}
+
+	/* Locate all the button and axis items */
+	locate_items(report_desc, conf->axis,
+	    axis_items, AXIS_SIZE, report_id);
+	locate_items(report_desc, conf->mode_buttons,
+	    button_items, NMODES, report_id);
+
+	/* Read joystick / Send ardupilot */
+	while (retval != -1) {
+		FD_SET(joystick_fd, &input_fds);
+
+		retval = select(joystick_fd + 1, &input_fds, NULL, NULL, &timeout);
+		if (retval == -1) {
+			debug_printf("Select error in readloop()\n");
+		} else if (retval) {
+			if (FD_ISSET(joystick_fd, &input_fds)) {
+				debug_printf("Data available on %d\n",
+				    joystick_fd);
+
+				status = hidtopwm(joystick_fd, message_buffer,
+				    report_size, &udp_data,
+				    button_items, NMODES,
+				    axis_items, AXIS_SIZE,
+				    conf->axis_dir);
+
+				if (status == -1) {
+					debug_printf("Joystick disconnected");
+					/* Send blank "signal" to ardupilot */
+					return -1;
+				}
+				/* Send data to ardupilot */
+			} else {
+				debug_printf("Unexpected, no FD was set\n");
+			}
+		}
+		for (i = 0; i < COM_NUM_CHANNELS; i++) {
+			debug_printf("%s : %d\n", CHANNEL_NAMES[i],
+			    udp_data.pwms[i]);
+		}
+	}
+	return 0;
 }

@@ -14,4 +14,3 @@ void debug_printf(const char *fmt, ...)
     va_end(arglist);
   }
 }
-
