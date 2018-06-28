@@ -23,12 +23,27 @@
 
 #define MAX(X, Y) ((X > Y) ? X : Y)
 
+uint16_t axistopwm(int16_t);
+int      locate_items(report_desc_t, int[], hid_item_t[], size_t, int);
+int      hidtopwm(int, u_char*, size_t, struct rc_packet*,
+		  hid_item_t[], size_t, hid_item_t[], size_t, int[]);
+
+/*
+ * Turns Axis values between 0x0 -> 0xFFFF into a converted
+ * "PWM"-value between 1100 -> 1900, inverted axis can be handled
+ * by just multiplying it with -1.
+ */
 uint16_t
 axistopwm(int16_t value)
 {
 	return (uint16_t)(((PMAX - PMIN) / AMAX) * (uint16_t)value + PMIN);
 }
 
+/*
+ * Takes a list of usage-nums and sets a list of corresponding items for
+ * each usage.
+ * Returns amount of located items. should be equal to len on success.
+ */
 int
 locate_items(report_desc_t d, int usages[], hid_item_t items[],
     size_t len, int id)
@@ -43,6 +58,10 @@ locate_items(report_desc_t d, int usages[], hid_item_t items[],
 	return i;
 }
 
+/*
+ * Turns values fetched from hid-items into "PWM"-values
+ * Returns 1 on success.
+ */
 int
 hidtopwm(int joy_fd, u_char *buffer, size_t size,
     struct rc_packet *udp_data,
@@ -85,6 +104,11 @@ hidtopwm(int joy_fd, u_char *buffer, size_t size,
 	return 1;
 }
 
+/*
+ * Main loop,
+ * Fetching values from HID.
+ * transforms the data and sends it to remote via UDP
+ */
 int
 readloop(int joystick_fd, report_desc_t report_desc,
     int report_id, struct Config *conf)
@@ -106,6 +130,12 @@ readloop(int joystick_fd, report_desc_t report_desc,
 
 	/* set new timeout */
 	timeout = (struct timeval){.tv_sec = 2, .tv_usec = 0};
+
+	/*
+	 * Need to implement function for sending data to remote.
+	 * Also needs to keep track of timestamps and more.
+	 * look at struct rc_packet definition.
+	 */
 
 	report_size = hid_report_size(report_desc, hid_input, report_id);
 	if (report_size <= 0) {

@@ -128,6 +128,11 @@ int main(int argc, char **argv)
 		   (0x2 << 16)|0xC4, (0x1 << 16)|0x30},
 	  .axis_dir = {1, -1, 1, 1}};
 
+  /*
+   * Implement function for setting up UDP-connection to remote.
+   * need to pass remote-connection into readloop for processing.
+   */
+
   readloop(joystick_fd, report_desc, report_id, &conf);
 
   /* Free report description obtained by hid_get_report_desc() */
